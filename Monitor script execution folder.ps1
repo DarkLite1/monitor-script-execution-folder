@@ -33,6 +33,11 @@
 
         In case the archive switch is not used and input error is detected a 
         mail will be send to the admin.
+
+    .PARAMETER InformAdmin
+        Sends a mail to the administrator to inform him when a users used an 
+        invalid input file or when users have launched jobs. This can be
+        convenient for monitoring purposes.
  #>
 
 [CmdLetBinding()]
@@ -56,7 +61,8 @@ Param (
     },
     [String]$LogFolder = "\\$env:COMPUTERNAME\Log",
     [String]$ScriptAdmin = $env:ScriptAdmin,
-    [Switch]$Archive
+    [Switch]$Archive,
+    [Switch]$InformAdmin
 )
 
 Begin {
@@ -246,13 +252,23 @@ Process {
                 $inputFile in 
                 (Get-ChildItem -LiteralPath $folder -File -Filter '*.json')
             ) {
+                $job = @{
+                    inputFile      = $inputFile
+                    scriptSettings = $scriptSettings
+                    owner          = $null
+                    archiveDir     = $null
+                    job            = $null
+                }
+                
                 Write-Verbose "Found input file '$inputFile'"
                 $fileContent = $inputFile | Get-Content -Raw
 
+                $job.owner = $inputFile.GetAccessControl().Owner -replace "$env:USERDOMAIN\\"
+
                 if ($Archive) {
                     Write-Verbose 'Move to archive folder'
-                    $archiveDir = New-FolderHC -Path $folder -ChildPath Archive
-                    $inputFile | Move-Item  -Destination $archiveDir -Force -EA Stop
+                    $job.archiveDir = New-FolderHC -Path $folder -ChildPath Archive
+                    $inputFile | Move-Item  -Destination $job.archiveDir -Force -EA Stop
                 }
 
                 #region Test valid .json file and allowed user parameters
@@ -274,10 +290,10 @@ Process {
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
-                        $errorFile = "$($archiveDir.FullName)\$($inputFile.BaseName) - ERROR.txt"
+                        $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.txt"
                         $errorMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
-                    else {
+                    if ((-not $Archive) -or $InformAdmin) {
                         Write-Verbose 'Send mail to admin'
                         Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
                     }
@@ -331,20 +347,34 @@ Process {
                     LiteralPath          = $scriptSettings.script
                     ArgumentList         = $startJobArgumentList
                 }
-                $job = Start-Job @StartJobParams
+                $job.job = Start-Job @StartJobParams
                 #endregion
 
-                $jobsStarted += @{
-                    archiveDir     = $archiveDir
-                    inputFile      = $inputFile
-                    scriptSettings = $scriptSettings
-                    job            = $job
-                }
+                $jobsStarted += $job
+                
                 $sameScriptNameCount++
             }
         }
 
         if ($jobsStarted) {
+            #region Inform the admin by mail
+            if ($InformAdmin) {
+                $mailParams = @{
+                    To      = $ScriptAdmin 
+                    Subject = "$($jobsStarted.Count) script started"
+                    Message = "<p>Scripts started:</p>
+                <table>
+                <tr><th>Script name</th><th>Input file</th><th>Owner</th></tr>
+                $($jobsStarted.ForEach({
+                    "<tr><td style=``"text-align: center``">{0}</td><td>{1}</td><td>{2}</td></tr>" -f $_.job.Name, $_.inputFile.Name, $_.owner
+                }))
+                </table>"
+                    Header  = $ScriptName
+                }
+                Send-MailHC @mailParams
+            }
+            #endregion
+
             #region Test combined parameters were accepted
             Write-Verbose 'Wait 5 seconds for initial job launch'
             Start-Sleep -Seconds 5
@@ -373,7 +403,7 @@ Process {
                         $errorFile = "$($j.archiveDir.FullName)\$($j.inputFile.BaseName) - ERROR.txt"
                         $errorMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
-                    else {
+                    if ((-not $Archive) -or $InformAdmin) {
                         Write-Verbose 'Send mail to admin'
                         Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
                     }

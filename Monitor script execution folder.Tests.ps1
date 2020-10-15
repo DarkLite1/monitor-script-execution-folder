@@ -280,7 +280,7 @@ Describe 'when the archive switch is not used' {
         It 'the input file is not moved to the archive folder' {
             $testInputFile | Should -Exist
         }
-        it 'Start-Job is called' {
+        It 'Start-Job is called' {
             Should -Invoke Start-Job -Scope Context
         }
     }
@@ -302,13 +302,13 @@ Describe 'when the archive switch is not used' {
         It 'the input file is not moved to the archive folder' {
             $testInputFile | Should -Exist
         }
-        it 'an email is sent to the admin' {
+        It 'an email is sent to the admin' {
             Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
                 (&$MailAdminParams) -and 
                 ($Message -like "*parameter 'UnknownParameter' is not accepted*")
             }
         }
-        it 'Start-Job is not called' {
+        It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
     }
@@ -459,9 +459,44 @@ Describe 'when an input file is incorrect because' {
         It 'an error file is created in the archive folder' {
             "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
             Should -Exist
-        }
+        } -Tag test
         It 'the error file contains the script parameters that are allowed' {
             Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Invalid input file 'inputFile.json'*validParameter*"
         }
     } 
+}
+
+Describe 'when the informAdmin switch is used' {
+    Context 'an email is send to the admin when' {
+        It 'an incorrect user input file is used' {
+            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+     
+            (New-Item -Path $testInputFile -Force -ItemType File -EA Ignore).FullName
+
+            "NotJsonFormat ;!= " | Out-File $testInputFile -Encoding utf8
+
+            . $testScript @Params -InformAdmin
+
+            Should -Not -Invoke Start-Job
+            Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
+                (&$MailAdminParams) -and 
+                ($Message -like "*Invalid json input file*")
+            }
+        }  -tag test
+        It 'a script has been launched with a valid user input file' {
+            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+     
+            @{  PrinterName = "MyCustomPrinter" } | 
+            ConvertTo-Json | Out-File $testInputFile -Encoding utf8
+    
+            . $testScript @Params -InformAdmin
+
+            Should -Invoke Start-Job
+            Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
+                ($To -eq $ScriptAdmin) -and 
+                ($Subject -eq '1 script started') -and 
+                ($Message -like "*Script name*")
+            }
+        }
+    }
 }
