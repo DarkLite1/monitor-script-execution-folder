@@ -321,10 +321,10 @@ Process {
                 Write-Verbose 'Start job'
 
                 Write-EventLog @EventOutParams -Message (
-                    "Launch script:`n`n" +
-                    "- InputFile:`t" + $inputFile.FullName + "`n" +
-                    "- Script:`t`t" + $scriptSettings.script + "`n" +
-                    "- ArgumentList:`t" + $startJobArgumentList)
+                    "Launch script:`n" +
+                    "`n- InputFile:`t" + $inputFile.FullName + 
+                    "`n- Script:`t`t" + $scriptSettings.script + 
+                    "`n- ArgumentList:`t" + $startJobArgumentList)
                 $StartJobParams = @{
                     Name                 = $defaultParameters['ScriptName']
                     InitializationScript = $LoadModules
