@@ -322,7 +322,7 @@ Process {
 
                 Write-EventLog @EventOutParams -Message (
                     "Launch script:`n`n" +
-                    "- InputFile:`t`t" + $inputFile.FullName + "`n" +
+                    "- InputFile:`t" + $inputFile.FullName + "`n" +
                     "- Script:`t`t" + $scriptSettings.script + "`n" +
                     "- ArgumentList:`t" + $startJobArgumentList)
                 $StartJobParams = @{
