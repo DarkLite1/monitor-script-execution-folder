@@ -67,52 +67,6 @@ Param (
 
 Begin {
     Try {
-        Function Get-FunctionDefaultParameterHC {
-            <#
-            .SYNOPSIS
-                Get the the default parameter values set in a script of function
-            
-            .EXAMPLE
-                 Get-FunctionDefaultParameter -Path Get-Something
-            
-            .PARAMETER Path
-                Function name or path to the script file
-            #>
-        
-            [CmdletBinding()]
-            [OutputType([hashtable])]
-            Param (
-                [Parameter(Mandatory)]
-                [string]$Path
-            )
-            try {
-                $ast = (Get-Command $Path).ScriptBlock.Ast
-                
-                $selectParams = @{
-                    Property = @{ 
-                        Name       = 'Name'; 
-                        Expression = { $_.Name.VariablePath.UserPath } 
-                    },
-                    @{ 
-                        Name       = 'Value'; 
-                        Expression = { $_.DefaultValue.Extent.Text -replace "`"|'" }
-                    }
-                }
-                
-                $result = @{ }
-        
-                @($ast.FindAll( { $args[0] -is [System.Management.Automation.Language.ParameterAst] }, $true) | 
-                    Where-Object { $_.DefaultValue } | 
-                    Select-Object @selectParams).foreach( { 
-                        $result[$_.Name] = $ExecutionContext.InvokeCommand.ExpandString($_.Value)
-                    })
-                $result
-            }
-            catch {
-                throw "Failed retrieving the default parameter values: $_"
-            }
-        }
-
         Function Get-ScriptSettingsHC {
             Param (
                 [parameter(Mandatory)]
@@ -187,7 +141,7 @@ Begin {
                 userInfoList  = foreach ($p in $scriptParameters.GetEnumerator()) {
                     'Name: {0} Type: {1} Mandatory: {2} ' -f $p.Value.Name, $p.Value.ParameterType, $p.Value.Attributes.Mandatory
                 }
-                defaultValues = Get-FunctionDefaultParameterHC -Path $script
+                defaultValues = Get-DefaultParameterValuesHC -Path $script
             }
 
             $scriptParametersNameList = $item.Value['scriptParameters'].nameList
