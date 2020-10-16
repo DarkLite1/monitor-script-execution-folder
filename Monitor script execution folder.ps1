@@ -138,10 +138,14 @@ Begin {
         Import-EventLogParamsHC -Source $ScriptName
         Write-EventLog @EventStartParams
 
-        #region Test logFolder
-        if (-not (Test-Path $LogFolder -PathType Container)) {
-            throw "Log folder '$LogFolder' not found"
+        #region Logging
+        $LogParams = @{
+            LogFolder    = New-FolderHC -Path $LogFolder -ChildPath "Monitor\Monitor script execution folder\$ScriptName"
+            Name         = $ScriptName
+            Date         = 'ScriptStartTime'
+            NoFormatting = $true
         }
+        $LogFile = New-LogFileNameHC @LogParams
         #endregion
 
         $psBuildInParameters = [System.Management.Automation.PSCmdlet]::CommonParameters
@@ -263,6 +267,9 @@ Process {
                 Write-Verbose "Found input file '$inputFile'"
                 $fileContent = $inputFile | Get-Content -Raw
 
+                Write-Verbose "Copy input file to log folder '$($LogParams.LogFolder)'"
+                Copy-Item -Path $inputFile.FullName -Destination "$LogFile - $($inputFile.Directory.Name) - $($inputFile.Name)"
+
                 $job.owner = $inputFile.GetAccessControl().Owner -replace "$env:USERDOMAIN\\"
 
                 if ($Archive) {
@@ -287,6 +294,9 @@ Process {
                     Write-Warning "Invalid .json input file: $_"
 
                     $errorMessage = "Invalid json input file '$($inputFile.Name)'`r`nError:$_`r`nScript parameters:`r`n$($scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+
+                    Write-Verbose 'Write error to log file'
+                    $errorMessage | Out-File  "$LogFile - $($inputFile.Directory.Name) - $($inputFile.Name) - ERROR.txt" -Encoding utf8 -Force
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
@@ -397,6 +407,9 @@ Process {
                     Write-Warning 'Invalid input file parameters'
 
                     $errorMessage = "Invalid input file '$($j.inputFile.Name)'`r`n`r`nParameter error: $parameterError`r`n`r`nScript parameters:`r`n$($j.scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+
+                    Write-Verbose 'Write error to log file'
+                    $errorMessage | Out-File  "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.txt" -Encoding utf8 -Force
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'

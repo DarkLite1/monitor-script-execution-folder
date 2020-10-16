@@ -36,7 +36,7 @@ BeforeAll {
 
     $Params = @{
         ScriptName    = 'Test'
-        DropFolder    = (New-Item -Path "TestDrive:\input\scriptA\Weekly" -ItemType Directory -Force -EA Ignore).FullName
+        DropFolder    = (New-Item -Path "TestDrive:\input\scriptA\Get printers" -ItemType Directory -Force -EA Ignore).FullName
         LogFolder     = (New-Item -Path "TestDrive:\Log" -ItemType Directory -EA Ignore).FullName
         ScriptMapping = @{ $testScriptFolder = $testScriptSettings }
         Archive       = $true
@@ -62,7 +62,7 @@ Describe 'error handling' {
     
             Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
                 (&$MailAdminParams) -and 
-                ($Message -like "*Log folder 'NotExistingLogFolder' not found*")
+                ($Message -like "*Path 'NotExistingLogFolder' not found*")
             }
             Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
         }
@@ -80,7 +80,7 @@ Describe 'error handling' {
             Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
         }
         It 'needs to be within a script folder' {
-            $testDropFolder = (New-Item -Path "TestDrive:\input\ScriptWithoutScriptMapping\Weekly" -ItemType Container -Force -EA Ignore).FullName
+            $testDropFolder = (New-Item -Path "TestDrive:\input\ScriptWithoutScriptMapping\Get printers" -ItemType Container -Force -EA Ignore).FullName
             $clonedParams = $Params.Clone()
             $clonedParams.DropFolder = $testDropFolder
 
@@ -259,6 +259,20 @@ Describe 'a valid user input file found in a drop folder' {
             ($ArgumentList[3] -eq 'A4') # default parameter in the script is copied
         }
     }
+    Context 'logging' {
+        BeforeAll {
+            $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
+        }
+        It 'the log folder is created' {            
+            $testLogFolder | Should -Exist
+        }
+        It 'a copy of the input file is stored in the log folder' {
+            $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+            
+            $testLogFile | Should -Not -BeNullOrEmpty
+            $testLogFile.Name | Should -BeLike '*- Get printers - inputFile.json'
+        }
+    }
 }
 
 Describe 'when the archive switch is not used' {
@@ -402,6 +416,24 @@ Describe 'when an input file is incorrect because' {
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
+        Context 'logging' {
+            BeforeAll {
+                $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
+                $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+            }
+            It 'the log folder is created' {            
+                $testLogFolder | Should -Exist
+            }
+            it 'two files are created in the log folder' {
+                $testLogFile.Count | should -BeExactly 2
+            }
+            It 'one file is a copy of the input file' {
+                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
+            }
+            It 'the other file contains the error message' {
+                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json - ERROR.txt'
+            }
+        }
     }
     Context 'the user used a parameter that is not available in the scriptMapping table' {
         BeforeAll {
@@ -426,6 +458,24 @@ Describe 'when an input file is incorrect because' {
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
+        Context 'logging' {
+            BeforeAll {
+                $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
+                $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+            }
+            It 'the log folder is created' {            
+                $testLogFolder | Should -Exist
+            }
+            it 'two files are created in the log folder' {
+                $testLogFile.Count | should -BeExactly 2
+            }
+            It 'one file is a copy of the input file' {
+                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
+            }
+            It 'the other file contains the error message' {
+                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json - ERROR.txt'
+            }
+        } -Tag 'test'
     }
     Context 'when Start-Job fails because of an incorrect parameter in the input file' {
         BeforeAll {
@@ -459,7 +509,7 @@ Describe 'when an input file is incorrect because' {
         It 'an error file is created in the archive folder' {
             "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
             Should -Exist
-        } -Tag test
+        }
         It 'the error file contains the script parameters that are allowed' {
             Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Invalid input file 'inputFile.json'*validParameter*"
         }
@@ -482,7 +532,7 @@ Describe 'when the informAdmin switch is used' {
                 (&$MailAdminParams) -and 
                 ($Message -like "*Invalid json input file*")
             }
-        }  -tag test
+        }
         It 'a script has been launched with a valid user input file' {
             $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
      
