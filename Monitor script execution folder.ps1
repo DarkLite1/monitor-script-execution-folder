@@ -138,7 +138,7 @@ Begin {
             $scriptParametersNameList = $item.Value['scriptParameters'].nameList
             #endregion
 
-            #region Test ScriptName is not NULL
+            #region Test ScriptName is mandatory
             if (-not $defaultParameters['ScriptName']) {
                 throw "Parameter 'ScriptName' is missing and is mandatory for every script. We need to be able to hand over a unique 'ScriptName' to the script so it can create a unique log folder and event viewer log based on the 'ScriptName'."
             }
@@ -250,6 +250,7 @@ Process {
                         $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.txt"
                         $errorMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
+
                     Write-Verbose 'Send mail to admin'
                     Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
 
