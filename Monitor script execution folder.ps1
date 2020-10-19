@@ -28,16 +28,8 @@
 
     .PARAMETER Archive
         When the archive switch is used the input file will be moved to the 
-        folder 'Archive' withing the drop folder. Any error in the input file
+        folder 'Archive' within the drop folder. Any error in the input file
         will generate an error file next to he input file in the archive folder.
-
-        In case the archive switch is not used and input error is detected a 
-        mail will be send to the admin.
-
-    .PARAMETER InformAdmin
-        Sends a mail to the administrator to inform him when a users used an 
-        invalid input file or when users have launched jobs. This can be
-        convenient for monitoring purposes.
  #>
 
 [CmdLetBinding()]
@@ -61,8 +53,7 @@ Param (
     },
     [String]$LogFolder = "\\$env:COMPUTERNAME\Log",
     [String]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN,
-    [Switch]$Archive,
-    [Switch]$InformAdmin
+    [Switch]$Archive
 )
 
 Begin {
@@ -149,7 +140,7 @@ Begin {
 
             #region Test ScriptName is not NULL
             if (-not $defaultParameters['ScriptName']) {
-                throw "Parameter 'ScriptName' is missing and is mandatory for every script. We need to be able to hand over a unique 'ScriptName' to the script so ti can create a unique log folder and event viewer log based on the 'ScriptName'."
+                throw "Parameter 'ScriptName' is missing and is mandatory for every script. We need to be able to hand over a unique 'ScriptName' to the script so it can create a unique log folder and event viewer log based on the 'ScriptName'."
             }
             #endregion
 
@@ -175,7 +166,7 @@ Begin {
     }
     Catch {
         Write-Warning $_
-        Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $_ -Header $ScriptName
+        Send-MailHC -To $ScriptAdmin -Subject 'FAILURE' -Priority 'High' -Message $_ -Header $ScriptName
         Write-EventLog @EventErrorParams -Message "FAILURE:`n`n- $_"
         Write-EventLog @EventEndParams; Exit 1
     }
@@ -221,15 +212,17 @@ Process {
                 Write-Verbose "Found input file '$inputFile'"
                 $fileContent = $inputFile | Get-Content -Raw
 
+                #region Copy input file to log folder
                 Write-Verbose "Copy input file to log folder '$($LogParams.LogFolder)'"
                 Copy-Item -Path $inputFile.FullName -Destination "$LogFile - $($inputFile.Directory.Name) - $($inputFile.Name)"
+                #endregion
 
                 $job.owner = $inputFile.GetAccessControl().Owner -replace "$env:USERDOMAIN\\"
 
                 if ($Archive) {
                     Write-Verbose 'Move to archive folder'
                     $job.archiveDir = New-FolderHC -Path $folder -ChildPath Archive
-                    $inputFile | Move-Item  -Destination $job.archiveDir -Force -EA Stop
+                    $inputFile | Move-Item -Destination $job.archiveDir -Force -EA Stop
                 }
 
                 #region Test valid .json file and allowed user parameters
@@ -257,10 +250,8 @@ Process {
                         $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.txt"
                         $errorMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
-                    if ((-not $Archive) -or $InformAdmin) {
-                        Write-Verbose 'Send mail to admin'
-                        Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
-                    }
+                    Write-Verbose 'Send mail to admin'
+                    Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
 
                     Write-EventLog @EventWarnParams -Message $errorMessage
                     Continue
@@ -322,45 +313,41 @@ Process {
 
         if ($jobsStarted) {
             #region Inform the admin by mail
-            if ($InformAdmin) {
-                $mailParams = @{
-                    To      = $ScriptAdmin 
-                    Subject = "$($jobsStarted.Count) script started"
-                    Message = "<p>Scripts started:</p>
+            $mailParams = @{
+                To      = $ScriptAdmin 
+                Subject = "$($jobsStarted.Count) script started"
+                Message = "<p>Scripts started:</p>
                 <table>
                 <tr><th>Script name</th><th>Input file</th><th>Owner</th></tr>
                 $($jobsStarted.ForEach({
                     "<tr><td style=``"text-align: center``">{0}</td><td>{1}</td><td>{2}</td></tr>" -f $_.job.Name, $_.inputFile.Name, $_.owner
                 }))
                 </table>"
-                    Header  = $ScriptName
-                }
-                Send-MailHC @mailParams
+                Header  = $ScriptName
             }
+            Send-MailHC @mailParams
             #endregion
 
-            #region Test combined parameters were accepted
             Write-Verbose 'Wait 5 seconds for initial job launch'
             Start-Sleep -Seconds 5
 
-            foreach ($j in $jobsStarted.Where( { $_.job.State -match '^Blocked$|^Failed$' })) {
-                # We only check parameter validation errors, 
-                # all other errors are handled by the child scripts
-                Write-Verbose "Job '$($j.job.Name)' has status '$($j.job.State)'"
+            foreach ($j in $jobsStarted) {
+                $jobError = $null
+                Write-Verbose "Job '$($j.job.Name)' status '$($j.job.State)'"
 
+                # Missing mandatory parameters set the state to 'Blocked'
                 if ($j.Job.State -eq 'Blocked') {
-                    $parameterError = 'Have you provided all mandatory parameters?'
+                    $jobError = "Job status 'Blocked', have you provided all mandatory parameters?"
                 }
                 else {
-                    $null = $j.Job | Receive-Job -ErrorVariable 'prob'
-                    $parameterError = ( $prob | Where-Object { 
-                            $_.FullyQualifiedErrorId -Like '*Parameter*' }).Exception.Message
+                    $j.job | Wait-Job
+                    $null = $j.Job | Receive-Job -ErrorVariable 'jobError'
                 }
                 
-                if ($parameterError) {
-                    Write-Warning 'Invalid input file parameters'
+                if ($jobError) {
+                    Write-Warning "Job '$($j.job.Name)' with status '$($j.job.State)' has error: $jobError"
 
-                    $errorMessage = "Invalid input file '$($j.inputFile.Name)'`r`n`r`nParameter error: $parameterError`r`n`r`nScript parameters:`r`n$($j.scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+                    $errorMessage = "Invalid input file '$($j.inputFile.Name)'`r`n`r`nParameter error: $jobError`r`n`r`nScript parameters:`r`n$($j.scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
 
                     Write-Verbose 'Write error to log file'
                     $errorMessage | Out-File  "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.txt" -Encoding utf8 -Force
@@ -370,10 +357,8 @@ Process {
                         $errorFile = "$($j.archiveDir.FullName)\$($j.inputFile.BaseName) - ERROR.txt"
                         $errorMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
-                    if ((-not $Archive) -or $InformAdmin) {
-                        Write-Verbose 'Send mail to admin'
-                        Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
-                    }
+                    Write-Verbose 'Send mail to admin'
+                    Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
 
                     Write-EventLog @EventWarnParams -Message $errorMessage
                 }
@@ -386,8 +371,6 @@ Process {
             }
             #endregion
 
-            Write-Verbose 'Wait for all jobs to finish'
-            Get-Job | Wait-Job | Receive-Job
             Write-Verbose 'All jobs finished'
         }
         else {
@@ -398,7 +381,7 @@ Process {
     }
     Catch {
         Write-Warning $_
-        Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $_ -Header $ScriptName
+        Send-MailHC -To $ScriptAdmin -Subject 'FAILURE' -Priority 'High' -Message $_ -Header $ScriptName
         Write-EventLog @EventErrorParams -Message "FAILURE:`n`n- $_"
         Exit 1
     }

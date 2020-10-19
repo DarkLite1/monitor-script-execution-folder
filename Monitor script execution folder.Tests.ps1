@@ -43,7 +43,9 @@ BeforeAll {
     }    
 
     Mock Send-MailHC
-    Mock Start-Job
+    Mock Start-Job -MockWith {
+        & $StartJobCommand -ScriptBlock {1} -Name 'Get printers (BNL)'
+    }
     Mock Write-EventLog
 }
 
@@ -191,7 +193,7 @@ Describe 'error handling' {
         
                 Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
                     (&$MailAdminParams) -and 
-                    ($Message -like "*Parameter 'ScriptName' is missing and is mandatory for every script. We need to be able to hand over a unique 'ScriptName' to the script so ti can create a unique log folder and event viewer log based on the 'ScriptName'.*")
+                    ($Message -like "*Parameter 'ScriptName' is missing and is mandatory for every script. We need to be able to hand over a unique 'ScriptName' to the script so it can create a unique log folder and event viewer log based on the 'ScriptName'.*")
                 }
                 Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
             }
@@ -257,6 +259,13 @@ Describe 'a valid user input file found in a drop folder' {
             ($ArgumentList[1] -eq 'red') -and
             ($ArgumentList[2] -eq 'Get printers (BNL)') -and
             ($ArgumentList[3] -eq 'A4') # default parameter in the script is copied
+        }
+    }
+    It 'should send an email to the admin' {
+        Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
+            ($To -eq $ScriptAdmin) -and 
+            ($Subject -eq '1 script started') -and 
+            ($Message -like "*Script name*")
         }
     }
     Context 'logging' {
@@ -394,6 +403,9 @@ Describe 'when an input file is incorrect because' {
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
+        It 'Send-MailHC is not called' {
+            Should -Not -Invoke Send-MailHC -Exactly 1 -Scope Context
+        }
     }
     Context 'it is not a valid .json file' {
         BeforeAll {
@@ -416,6 +428,12 @@ Describe 'when an input file is incorrect because' {
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
+        It 'an email is sent to the admin' {
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
+                (&$MailAdminParams) -and 
+                ($Message -like "*Invalid json input file*")
+            }
+        }
         Context 'logging' {
             BeforeAll {
                 $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
@@ -424,8 +442,8 @@ Describe 'when an input file is incorrect because' {
             It 'the log folder is created' {            
                 $testLogFolder | Should -Exist
             }
-            it 'two files are created in the log folder' {
-                $testLogFile.Count | should -BeExactly 2
+            It 'two files are created in the log folder' {
+                $testLogFile.Count | Should -BeExactly 2
             }
             It 'one file is a copy of the input file' {
                 $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
@@ -458,6 +476,12 @@ Describe 'when an input file is incorrect because' {
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
+        It 'an email is sent to the admin' {
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
+                (&$MailAdminParams) -and 
+                ($Message -like "*parameter 'UnknownParameter' is not accepted*")
+            }
+        } 
         Context 'logging' {
             BeforeAll {
                 $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
@@ -466,8 +490,8 @@ Describe 'when an input file is incorrect because' {
             It 'the log folder is created' {            
                 $testLogFolder | Should -Exist
             }
-            it 'two files are created in the log folder' {
-                $testLogFile.Count | should -BeExactly 2
+            It 'two files are created in the log folder' {
+                $testLogFile.Count | Should -BeExactly 2
             }
             It 'one file is a copy of the input file' {
                 $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
@@ -475,29 +499,63 @@ Describe 'when an input file is incorrect because' {
             It 'the other file contains the error message' {
                 $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json - ERROR.txt'
             }
-        } -Tag 'test'
+        }
     }
-    Context 'when Start-Job fails because of an incorrect parameter in the input file' {
+}
+
+Describe 'when Start-Job fails' {
+    Context 'because of a missing mandatory parameter' {
         BeforeAll {
             $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
-    
-            $clonedScriptSettings = $testScriptSettings.Clone()
-            $clonedScriptSettings.PrinterColor = $null
-            
-            $clonedParams = $Params.Clone()
-            $clonedParams.ScriptMapping = @{ 
-                $testScriptFolder = $clonedScriptSettings 
-            }
 
             Mock Start-Job {
                 & $StartJobCommand -Scriptblock { 
                     Param (
                         [parameter(Mandatory)]
-                        [int]$validParameter
+                        [int]$Number,
+                        [parameter(Mandatory)]
+                        [String]$Name
                     )
+                    # parameters name is missing
+                } -ArgumentList 1
+            }
+            . $testScript @Params
+        }
+        It 'the input file is moved to the archive folder' {
+            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+        }
+        It 'an error file is created in the archive folder' {
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            Should -Exist
+        }
+        It 'the error file contains the error message' {
+            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Job status 'Blocked', have you provided all mandatory parameters?*"
+        }
+        It 'an email is sent to the admin' {
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
+                (&$MailAdminParams) -and 
+                ($Message -like "*Job status 'Blocked', have you provided all mandatory parameters?*")
+            }
+        } 
+    }
+    Context 'because of parameter validation issues' {
+        BeforeAll {
+            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+     
+            @{  PrinterName = "MyCustomPrinter" } | 
+            ConvertTo-Json | Out-File $testInputFile -Encoding utf8
+
+            Mock Start-Job {
+                & $StartJobCommand -Scriptblock { 
+                    Param (
+                        [parameter(Mandatory)]
+                        [int]$IncorrectParameters
+                    )
+                    # parameters not matching
                 } -ArgumentList 'string'
             }
             . $testScript @Params
@@ -510,43 +568,47 @@ Describe 'when an input file is incorrect because' {
             "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
             Should -Exist
         }
-        It 'the error file contains the script parameters that are allowed' {
-            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Invalid input file 'inputFile.json'*validParameter*"
+        It 'the error file contains the error message' {
+            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Cannot process argument transformation on parameter 'IncorrectParameters'*"
         }
-    } 
-}
-
-Describe 'when the informAdmin switch is used' {
-    Context 'an email is send to the admin when' {
-        It 'an incorrect user input file is used' {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
-     
-            (New-Item -Path $testInputFile -Force -ItemType File -EA Ignore).FullName
-
-            "NotJsonFormat ;!= " | Out-File $testInputFile -Encoding utf8
-
-            . $testScript @Params -InformAdmin
-
-            Should -Not -Invoke Start-Job
-            Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
+        It 'an email is sent to the admin' {
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
                 (&$MailAdminParams) -and 
-                ($Message -like "*Invalid json input file*")
+                ($Message -like "*Cannot process argument transformation on parameter 'IncorrectParameters'*")
             }
-        }
-        It 'a script has been launched with a valid user input file' {
+        } 
+    }
+    Context 'because of errors in the execution script' {
+        BeforeAll {
             $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
-    
-            . $testScript @Params -InformAdmin
 
-            Should -Invoke Start-Job
-            Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
-                ($To -eq $ScriptAdmin) -and 
-                ($Subject -eq '1 script started') -and 
-                ($Message -like "*Script name*")
+            Mock Start-Job {
+                & $StartJobCommand -Scriptblock { 
+                    throw 'Failure in script'
+                }
             }
+
+            . $testScript @Params
         }
-    }
+        It 'the input file is moved to the archive folder' {
+            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+        }
+        It 'an error file is created in the archive folder' {
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            Should -Exist
+        }
+        It 'the error file contains the error message' {
+            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Failure in script*"
+        }
+        It 'an email is sent to the admin' {
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
+                (&$MailAdminParams) -and 
+                ($Message -like "*Failure in script*")
+            }
+        } 
+    } 
 }
