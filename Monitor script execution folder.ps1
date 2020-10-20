@@ -409,7 +409,7 @@ Process {
                     Write-EventLog @EventWarnParams -Message $errorFileMessage
                 }
                 else {
-                    Write-Verbose 'Job has no parameter failure, resume other jobs'
+                    Write-Verbose 'Job has no errors, resume other jobs'
                 }
 
                 $j.Job | Remove-Job -Force
