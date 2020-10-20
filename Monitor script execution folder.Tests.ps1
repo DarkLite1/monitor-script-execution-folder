@@ -44,7 +44,7 @@ BeforeAll {
 
     Mock Send-MailHC
     Mock Start-Job -MockWith {
-        & $StartJobCommand -ScriptBlock {1} -Name 'Get printers (BNL)'
+        & $StartJobCommand -Scriptblock { 1 } -Name 'Get printers (BNL)'
     }
     Mock Write-EventLog
 }
@@ -327,7 +327,9 @@ Describe 'when the archive switch is not used' {
         }
         It 'an email is sent to the admin' {
             Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
-                (&$MailAdminParams) -and 
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*parameter 'UnknownParameter' is not accepted*")
             }
         }
@@ -422,7 +424,7 @@ Describe 'when an input file is incorrect because' {
             "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'Start-Job is not called' {
@@ -430,7 +432,9 @@ Describe 'when an input file is incorrect because' {
         }
         It 'an email is sent to the admin' {
             Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
-                (&$MailAdminParams) -and 
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*Invalid json input file*")
             }
         }
@@ -446,10 +450,10 @@ Describe 'when an input file is incorrect because' {
                 $testLogFile.Count | Should -BeExactly 2
             }
             It 'one file is a copy of the input file' {
-                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
+                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json'
             }
             It 'the other file contains the error message' {
-                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json - ERROR.txt'
+                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile - ERROR.json'
             }
         }
     }
@@ -460,25 +464,28 @@ Describe 'when an input file is incorrect because' {
             @{  PrinterName = "MyCustomPrinter"; UnknownParameter = 'Oops' } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
     
-            . $testScript @Params
+            . $testScript @Params -EA Ignore
         }
         It 'it is moved to the archive folder in the drop folder' {
             "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
             "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the incorrect parameter name' {
-            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*parameter 'UnknownParameter' is not accepted*"
-        }
+            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual.errorMessage | Should -BeLike "*parameter 'UnknownParameter' is not accepted*"
+        } 
         It 'Start-Job is not called' {
             Should -Not -Invoke Start-Job -Scope Context
         }
         It 'an email is sent to the admin' {
             Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
-                (&$MailAdminParams) -and 
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*parameter 'UnknownParameter' is not accepted*")
             }
         } 
@@ -494,10 +501,10 @@ Describe 'when an input file is incorrect because' {
                 $testLogFile.Count | Should -BeExactly 2
             }
             It 'one file is a copy of the input file' {
-                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile.json'
+                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json'
             }
             It 'the other file contains the error message' {
-                $testLogFile[1].Name | Should -BeLike '*- Get printers - inputFile.json - ERROR.txt'
+                $testLogFile[0].Name | Should -BeLike '*- Get printers - inputFile - ERROR.json'
             }
         }
     }
@@ -522,22 +529,25 @@ Describe 'when Start-Job fails' {
                     # parameters name is missing
                 } -ArgumentList 1
             }
-            . $testScript @Params
+            . $testScript @Params -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
             "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
             "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Job status 'Blocked', have you provided all mandatory parameters?*"
-        }
+            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual.errorMessage | Should -BeLike "*Job status 'Blocked', have you provided all mandatory parameters?*"
+        } -Tag test
         It 'an email is sent to the admin' {
-            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
-                (&$MailAdminParams) -and 
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*Job status 'Blocked', have you provided all mandatory parameters?*")
             }
         } 
@@ -558,22 +568,25 @@ Describe 'when Start-Job fails' {
                     # parameters not matching
                 } -ArgumentList 'string'
             }
-            . $testScript @Params
+            . $testScript @Params -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
             "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
             "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Cannot process argument transformation on parameter 'IncorrectParameters'*"
+            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual.errorMessage | Should -BeLike "*Cannot process argument transformation on parameter 'IncorrectParameters'*"
         }
         It 'an email is sent to the admin' {
-            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
-                (&$MailAdminParams) -and 
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*Cannot process argument transformation on parameter 'IncorrectParameters'*")
             }
         } 
@@ -591,24 +604,27 @@ Describe 'when Start-Job fails' {
                 }
             }
 
-            . $testScript @Params
+            . $testScript @Params -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
             "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
             "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" | 
+            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.txt" -Raw | Should -BeLike "*Failure in script*"
+            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual.errorMessage | Should -BeLike "*Failure in script*"
         }
         It 'an email is sent to the admin' {
-            Should -Invoke Send-MailHC -Exactly 1 -Scope Describe -ParameterFilter {
-                (&$MailAdminParams) -and 
+            Should -Invoke Send-MailHC -Exactly 1 -Scope Context -ParameterFilter {
+                ($To -eq $ScriptAdmin) -and 
+                ($Priority -eq 'High') -and 
+                ($Subject -eq 'FAILURE - Get printers')
                 ($Message -like "*Failure in script*")
             }
         } 
     } 
-}
+} -Tag test

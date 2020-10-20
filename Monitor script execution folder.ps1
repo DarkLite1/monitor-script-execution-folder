@@ -204,6 +204,7 @@ Process {
                 $job = @{
                     inputFile      = $inputFile
                     scriptSettings = $scriptSettings
+                    argumentList   = $null
                     owner          = $null
                     archiveDir     = $null
                     job            = $null
@@ -240,21 +241,41 @@ Process {
                 catch {
                     Write-Warning "Invalid .json input file: $_"
 
-                    $errorMessage = "Invalid json input file '$($inputFile.Name)'`r`nError:$_`r`nScript parameters:`r`n$($scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+                    #region Create error file
+                    $errorFileMessage = [ordered]@{
+                        errorMessage      = $_.Exception.Message
+                        scriptFile        = $scriptSettings.script
+                        scriptParameters  = $scriptSettings.scriptParameters.userInfoList
+                        startJobArguments = $startJobArgumentList
+                        dropFolder        = $folder
+                    } | ConvertTo-Json -Depth 5 | Format-JsonHC
 
-                    Write-Verbose 'Write error to log file'
-                    $errorMessage | Out-File  "$LogFile - $($inputFile.Directory.Name) - $($inputFile.Name) - ERROR.txt" -Encoding utf8 -Force
+                    $logFileFullName = "$LogFile - $($inputFile.Directory.Name) - $($inputFile.BaseName) - ERROR.json"
+                    
+                    $errorFileMessage | Out-File $logFileFullName -Encoding utf8 -Force -EA Ignore
+                    #endregion
+
+                    #region Send mail
+                    $mailParams = @{
+                        To          = $ScriptAdmin 
+                        Subject     = "FAILURE - $($inputFile.Directory.Name)"
+                        Priority    = 'High' 
+                        Message     = "Script '<b>$($inputFile.Directory.Name)</b>' failed with error:
+                <p>Invalid parameter file: $_</p>
+                <p><i>* Check the attachment for details</i></p>"
+                        Header      = $ScriptName 
+                        Attachments = $logFileFullName
+                    }
+                    Send-MailHC @mailParams
+                    #endregion
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
-                        $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.txt"
-                        $errorMessage | Out-File $errorFile -Encoding utf8 -Force
+                        $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.json"
+                        $errorFileMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
 
-                    Write-Verbose 'Send mail to admin'
-                    Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
-
-                    Write-EventLog @EventWarnParams -Message $errorMessage
+                    Write-EventLog @EventWarnParams -Message $errorFileMessage
                     Continue
                 }
                 #endregion
@@ -286,6 +307,7 @@ Process {
                     $startJobArgumentList += , $value
                 }
 
+                $job.argumentList = $startJobArgumentList
                 Write-Verbose "Start-Job ArgumentList '$startJobArgumentList'"
                 #endregion
 
@@ -313,7 +335,7 @@ Process {
         }
 
         if ($jobsStarted) {
-            #region Inform the admin by mail
+            #region send mail to admin
             $mailParams = @{
                 To      = $ScriptAdmin 
                 Subject = "$($jobsStarted.Count) script started"
@@ -343,25 +365,111 @@ Process {
                 else {
                     $j.job | Wait-Job
                     $null = $j.Job | Receive-Job -ErrorVariable 'jobError'
+                    if ($jobError) { $jobError = $jobError.Exception.Message }
                 }
                 
                 if ($jobError) {
                     Write-Warning "Job '$($j.job.Name)' with status '$($j.job.State)' has error: $jobError"
 
-                    $errorMessage = "Invalid input file '$($j.inputFile.Name)'`r`n`r`nParameter error: $jobError`r`n`r`nScript parameters:`r`n$($j.scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+                    #region Create error file
+                    $errorFileMessage = "$($defaultParameters.ScriptName)
+Error message
+-----------------------------
+ERROR: $_
 
-                    Write-Verbose 'Write error to log file'
-                    $errorMessage | Out-File  "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.txt" -Encoding utf8 -Force
+
+
+Script parameters
+-----------------------------
+ORDER    NAME           VALUE
+$(
+    $list = for ($i = 0; $i -lt $scriptParametersNameList.Count; $i++) {
+        "{0}{1}{2}{3}{4}'{5}'" -f $(' ' *2), 
+        $i, 
+        $(' ' *6),
+        $scriptParametersNameList[$i], 
+        $(
+            $spaces =  15 - ($scriptParametersNameList[$i] | 
+            Measure-Object -Character).Characters
+            if($spaces -le 0) { $(' '*3) } else {' ' * $spaces}
+        ),
+        $(
+            if (
+                $startJobArgumentList -and ($startJobArgumentList.Count -ge $i)
+            ) {
+                $startJobArgumentList[$i]
+            }
+        )
+    }
+    $($List -join `"`r`n`")    
+)
+                                        
+                                        
+Script settings
+-----------------------------
+- Drop folder`t:`t$folder
+- Script`t`t:`t$($scriptSettings.script)
+- Default parameters:
+NAME           VALUE
+$(
+    $list = $defaultParameters.GetEnumerator().ForEach( {
+        "{0}{1}'{2}'" -f $_.Key,
+            $($spaces = 15 - ($_.Key | Measure-Object -Character).Characters
+            if ($spaces -le 0) { $(' ' * 3) } else { ' ' * $spaces }), 
+            $_.Value
+            })
+    $($List -join `"`r`n`")    
+)"
+                                                            
+                    # $logFileFullName = "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.json" 
+                    $logFileFullName = "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.json" 
+                                                            
+                    $errorFileMessage | Out-File $logFileFullName -Encoding utf8 -Force -EA Ignore
+                    #endregion
+
+                    #region Create error file
+                    $errorFileMessage = [ordered]@{
+                        errorMessage      = $jobError
+                        jobState          = $j.job.State
+                        inputFile         = $j.inputFile.FullName
+                        scriptFile        = $j.scriptSettings.script
+                        scriptParameters  = $j.scriptSettings.scriptParameters.userInfoList
+                        startJobArguments = $j.argumentList
+                    } | ConvertTo-Json -Depth 5 | Format-JsonHC
+                    
+                    $logFileFullName = "$LogFile - $($inputFile.Directory.Name) - $($inputFile.BaseName) - ERROR.json"
+                                        
+                    $errorFileMessage | Out-File $logFileFullName -Encoding utf8 -Force -EA Ignore
+                    #endregion
+                                        
+                    #region Send mail
+                    $mailParams = @{
+                        To          = $ScriptAdmin 
+                        Subject     = "FAILURE - $($j.inputFile.Directory.Name)"
+                        Priority    = 'High' 
+                        Message     = "Script '<b>$($j.inputFile.Directory.Name)</b>' failed with error:
+                        <p>$jobError</p>
+                        <p><i>* Check the attachment for details</i></p>"
+                        Header      = $ScriptName 
+                        Attachments = $logFileFullName
+                    }
+                    Send-MailHC @mailParams
+                    #endregion
+
+                    # $errorMessage = "Invalid input file '$($j.inputFile.Name)'`r`n`r`nParameter error: $jobError`r`n`r`nScript parameters:`r`n$($j.scriptSettings.scriptParameters.userInfoList -join `"`r`n`")" 
+
+                    # Write-Verbose 'Write error to log file'
+                    # $errorMessage | Out-File  "$LogFile - $($j.inputFile.Directory.Name) - $($j.inputFile.Name) - ERROR.json" -Encoding utf8 -Force
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
-                        $errorFile = "$($j.archiveDir.FullName)\$($j.inputFile.BaseName) - ERROR.txt"
-                        $errorMessage | Out-File $errorFile -Encoding utf8 -Force
+                        $errorFile = "$($j.archiveDir.FullName)\$($j.inputFile.BaseName) - ERROR.json"
+                        $errorFileMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
-                    Write-Verbose 'Send mail to admin'
-                    Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
+                    # Write-Verbose 'Send mail to admin'
+                    # Send-MailHC -To $ScriptAdmin -Subject FAILURE -Priority High -Message $errorMessage -Header $ScriptName
 
-                    Write-EventLog @EventWarnParams -Message $errorMessage
+                    Write-EventLog @EventWarnParams -Message $errorFileMessage
                 }
                 else {
                     Write-Verbose 'Job has no parameter failure, resume other jobs'
