@@ -50,6 +50,12 @@ Param (
                 ScriptName = 'Matrix AD object names (BNL)'
             }
         }
+        'T:\Input\Scripts\Get AD users all' = @{
+            script            = 'T:\Prod\AD Reports\AD Users all\AD Users all.ps1'
+            defaultParameters = @{
+                ScriptName = 'AD users all (BNL)'
+            }
+        }
     },
     [String]$LogFolder = "\\$env:COMPUTERNAME\Log",
     [String]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN,
