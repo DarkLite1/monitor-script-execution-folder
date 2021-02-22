@@ -51,9 +51,9 @@ Param (
             }
         }
     },
-    [String]$LogFolder = "\\$env:COMPUTERNAME\Log",
-    [String]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN,
-    [Switch]$Archive
+    [Switch]$Archive,
+    [String]$LogFolder = $env:POWERSHELL_LOG_FOLDER,
+    [String]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN
 )
 
 Begin {
