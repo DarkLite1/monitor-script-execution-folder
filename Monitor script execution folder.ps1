@@ -44,12 +44,6 @@ Param (
                 ScriptName = 'AD group members (BNL)'
             }
         }
-        'T:\Input\Scripts\Get matrix AD object names' = @{
-            script            = 'T:\Prod\Permission matrix\Get matrix AD object names\Get matrix AD object names.ps1'
-            defaultParameters = @{
-                ScriptName = 'Matrix AD object names (BNL)'
-            }
-        }
         'T:\Input\Scripts\Get AD users all' = @{
             script            = 'T:\Prod\AD Reports\AD Users all\AD Users all.ps1'
             defaultParameters = @{
