@@ -3,8 +3,6 @@
 BeforeAll {
     $StartJobCommand = Get-Command Start-Job
 
-    $testScript = $PSCommandPath.Replace('.Tests.ps1', '.ps1')
-
     $MailAdminParams = {
         ($To -eq $ScriptAdmin) -and 
         ($Priority -eq 'High') -and 
@@ -34,12 +32,13 @@ BeforeAll {
     )
 "@ | Out-File -FilePath $testScriptToExecute -Encoding utf8 -Force
 
-    $Params = @{
+    $testScript = $PSCommandPath.Replace('.Tests.ps1', '.ps1')
+    $testParams = @{
         ScriptName    = 'Test'
         DropFolder    = (New-Item -Path "TestDrive:\input\scriptA\Get printers" -ItemType Directory -Force -EA Ignore).FullName
-        LogFolder     = (New-Item -Path "TestDrive:\Log" -ItemType Directory -EA Ignore).FullName
         ScriptMapping = @{ $testScriptFolder = $testScriptSettings }
         Archive       = $true
+        LogFolder     = "TestDrive:\Log"
     }    
 
     Mock Send-MailHC
@@ -48,7 +47,6 @@ BeforeAll {
     }
     Mock Write-EventLog
 }
-
 Describe 'error handling' {    
     Context 'mandatory parameters' {
         It '<Name>' -TestCases @{ Name = 'DropFolder' } {
@@ -57,21 +55,21 @@ Describe 'error handling' {
         }
     }
     Context 'the logFolder' {
-        It 'should exist' {
-            $clonedParams = $Params.Clone()
-            $clonedParams.LogFolder = 'NotExistingLogFolder'
+        It 'cannot be created' {
+            $clonedParams = $testParams.Clone()
+            $clonedParams.LogFolder = 'xx:\NotExisting'
             . $testScript @clonedParams
     
             Should -Invoke Send-MailHC -Exactly 1 -ParameterFilter {
                 (&$MailAdminParams) -and 
-                ($Message -like "*Path 'NotExistingLogFolder' not found*")
+                ($Message -like "*Failed creating the log folder 'xx:\NotExisting'*")
             }
             Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
         }
     }
     Context 'the dropFolder' {
         It 'should exist' {
-            $clonedParams = $Params.Clone()
+            $clonedParams = $testParams.Clone()
             $clonedParams.DropFolder = @('NotExistingDropFolder')
             . $testScript @clonedParams
     
@@ -83,7 +81,7 @@ Describe 'error handling' {
         }
         It 'needs to be within a script folder' {
             $testDropFolder = (New-Item -Path "TestDrive:\input\ScriptWithoutScriptMapping\Get printers" -ItemType Container -Force -EA Ignore).FullName
-            $clonedParams = $Params.Clone()
+            $clonedParams = $testParams.Clone()
             $clonedParams.DropFolder = $testDropFolder
 
             . $testScript @clonedParams
@@ -95,7 +93,7 @@ Describe 'error handling' {
             Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
         }
         It 'can be the same as the script folder' {
-            $clonedParams = $Params.Clone()
+            $clonedParams = $testParams.Clone()
             $clonedParams.DropFolder = $testScriptFolder
 
             . $testScript @clonedParams
@@ -109,7 +107,7 @@ Describe 'error handling' {
     Context 'ScriptMapping' {
         Context 'the folder' {
             It 'should exist' {
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $clonedParams.ScriptMapping = @{
                     "TestDrive:\NotExistingFolder" = $testScriptSettings 
                 }
@@ -122,7 +120,7 @@ Describe 'error handling' {
                 Should -Invoke Write-EventLog -Exactly 1 -ParameterFilter { $EntryType -eq 'Error' }
             }
             It 'should have settings' {
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $testFolderFullName = (New-Item -Path "TestDrive:\input\scriptA" -ItemType Container -Force -EA Ignore).FullName
                 $clonedParams.ScriptMapping = @{
                     $testFolderFullName = $null
@@ -142,7 +140,7 @@ Describe 'error handling' {
                 $clonedScriptSettings = $testScriptSettings.Clone()
                 $clonedScriptSettings.Remove($Name)
                 
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $clonedParams.ScriptMapping = @{ 
                     $testScriptFolder = $clonedScriptSettings 
                 }
@@ -161,7 +159,7 @@ Describe 'error handling' {
                 $clonedScriptSettings = $testScriptSettings.Clone()
                 $clonedScriptSettings.script = "TestDrive:\doesNotExist.ps1" 
 
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $clonedParams.ScriptMapping = @{ 
                     $testScriptFolder = $clonedScriptSettings 
                 }
@@ -184,7 +182,7 @@ Describe 'error handling' {
                     ScriptName   = $null
                 }
 
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $clonedParams.ScriptMapping = @{ 
                     $testScriptFolder = $clonedScriptSettings 
                 }
@@ -206,7 +204,7 @@ Describe 'error handling' {
                     UnknownParameter = 'Not allowed'
                 }
 
-                $clonedParams = $Params.Clone()
+                $clonedParams = $testParams.Clone()
                 $clonedParams.ScriptMapping = @{ 
                     $testScriptFolder = $clonedScriptSettings 
                 }
@@ -222,22 +220,23 @@ Describe 'error handling' {
         }
     }
 }
-
 Describe 'a valid user input file found in a drop folder' {
     BeforeAll {
-        $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+        $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
         @{  PrinterName = "MyCustomPrinter" } | 
         ConvertTo-Json | Out-File $testInputFile -Encoding utf8
 
-        . $testScript @Params
+        $clonedParams = $testParams.Clone()
+        $clonedParams.LogFolder = "$($testParams.LogFolder)\Monitor\Monitor script execution folder\$($testParams.ScriptName)"
+        . $testScript @clonedParams
     }
     It 'is detected because it has a .json file extension' {
         $inputFile.FullName | Should -Be $testInputFile
     }
     It 'is moved to the archive folder within the drop folder' {
-        "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-        "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+        "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+        "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
     }
     It 'is matched with the correct script in the ScriptMapping hashtable' {
         $scriptSettings.script | Should -BeExactly $testScriptToExecute
@@ -253,7 +252,7 @@ Describe 'a valid user input file found in a drop folder' {
         $startJobArgumentList | Should -Contain 'red'
     }
     It 'should invoke Start-Job with the parameters in the correct order' {
-        Should -invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
+        Should -Invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
             ($LiteralPath -eq $testScriptToExecute) -and
             ($ArgumentList[0] -eq 'MyCustomPrinter') -and
             ($ArgumentList[1] -eq 'red') -and
@@ -269,36 +268,32 @@ Describe 'a valid user input file found in a drop folder' {
         }
     }
     Context 'logging' {
-        BeforeAll {
-            $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
-        }
         It 'the log folder is created' {            
-            $testLogFolder | Should -Exist
+            $clonedParams.LogFolder | Should -Exist
         }
         It 'a copy of the input file is stored in the log folder' {
-            $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+            $testLogFile = Get-ChildItem $clonedParams.LogFolder -Recurse -File
             
             $testLogFile | Should -Not -BeNullOrEmpty
             $testLogFile.Name | Should -BeLike '*- Get printers - inputFile.json'
         }
     }
 }
-
 Describe 'when the archive switch is not used' {
     Context 'and the input file is correct' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
         
-            $clonedParams = $Params.Clone()
+            $clonedParams = $testParams.Clone()
             $clonedParams.Remove('Archive')
 
             . $testScript @clonedParams
         }
         It 'no Archive folder is created' {
-            "$($Params.DropFolder)\Archive" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive" | Should -Not -Exist
         }
         It 'the input file is not moved to the archive folder' {
             $testInputFile | Should -Exist
@@ -309,10 +304,10 @@ Describe 'when the archive switch is not used' {
     }
     Context 'and the input file is not correct' {
         BeforeAll {
-            $clonedParams = $Params.Clone()
+            $clonedParams = $testParams.Clone()
             $clonedParams.Remove('Archive')
 
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter"; UnknownParameter = 'Oops' } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
@@ -320,7 +315,7 @@ Describe 'when the archive switch is not used' {
             . $testScript @clonedParams
         }
         It 'no Archive folder is created' {
-            "$($Params.DropFolder)\Archive" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive" | Should -Not -Exist
         }
         It 'the input file is not moved to the archive folder' {
             $testInputFile | Should -Exist
@@ -338,7 +333,6 @@ Describe 'when the archive switch is not used' {
         }
     }
 }
-
 Describe 'when the drop folder is the same as the folder in ScriptMapping' {
     It 'the script is also correctly executed' {
         $testInputFile = (Join-Path $testScriptFolder 'inputFile.json')
@@ -346,39 +340,38 @@ Describe 'when the drop folder is the same as the folder in ScriptMapping' {
         @{  PrinterName = "MyCustomPrinter" } | 
         ConvertTo-Json | Out-File $testInputFile -Encoding utf8
 
-        $clonedParams = $Params.Clone()
+        $clonedParams = $testParams.Clone()
         $clonedParams.DropFolder = $testScriptFolder
 
         . $testScript @clonedParams
 
-        Should -invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
+        Should -Invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
             ($LiteralPath -eq $testScriptToExecute) -and
             ($ArgumentList[0] -eq 'MyCustomPrinter') -and
             ($ArgumentList[1] -eq 'red')
         }
     }
 }
-
 Describe 'multiple input files for the same script' {
     BeforeAll {
-        $testInputFile1 = (Join-Path $Params.dropFolder 'inputFile1.json')
-        $testInputFile2 = (Join-Path $Params.dropFolder 'inputFile2.json')
+        $testInputFile1 = (Join-Path $testParams.dropFolder 'inputFile1.json')
+        $testInputFile2 = (Join-Path $testParams.dropFolder 'inputFile2.json')
      
         @{ PrinterName = "Printer1" } | 
         ConvertTo-Json | Out-File $testInputFile1 -Encoding utf8
         @{  PrinterName = "Printer2" } | 
         ConvertTo-Json | Out-File $testInputFile2 -Encoding utf8
       
-        . $testScript @Params
+        . $testScript @testParams
     }
     It 'should invoke Start-Job with a unique script name for a unique log folder creation by the child script' {
-        Should -invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
+        Should -Invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
             ($LiteralPath -eq $testScriptToExecute) -and
             ($ArgumentList[0] -eq 'Printer1') -and
             ($ArgumentList[1] -eq 'red') -and
             ($ArgumentList[2] -eq 'Get printers (BNL)')
         }
-        Should -invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
+        Should -Invoke Start-Job -Exactly 1 -Scope Describe -ParameterFilter {
             ($LiteralPath -eq $testScriptToExecute) -and
             ($ArgumentList[0] -eq 'Printer2') -and
             ($ArgumentList[1] -eq 'red') -and
@@ -386,17 +379,16 @@ Describe 'multiple input files for the same script' {
         }
     }
 }
-
 Describe 'when an input file is incorrect because' {
     Context 'it has another extension than .json' {
         BeforeAll {
             Mock ConvertFrom-Json
 
-            $testInputFileExclude = (Join-Path $Params.dropFolder 'file.txt')
+            $testInputFileExclude = (Join-Path $testParams.dropFolder 'file.txt')
          
             (New-Item -Path $testInputFileExclude -Force -ItemType File -EA Ignore).FullName
     
-            . $testScript @Params
+            . $testScript @testParams
         }
         It 'it is ignored and left in the drop folder' {
             $testInputFileExclude | Should -Exist
@@ -411,20 +403,22 @@ Describe 'when an input file is incorrect because' {
     }
     Context 'it is not a valid .json file' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             (New-Item -Path $testInputFile -Force -ItemType File -EA Ignore).FullName
 
             "NotJsonFormat ;!= " | Out-File $testInputFile -Encoding utf8
 
-            . $testScript @Params
+            $clonedParams = $testParams.Clone()
+            $clonedParams.LogFolder = "$($testParams.LogFolder)\test"
+            . $testScript @clonedParams
         }
         It 'it is moved to the archive folder in the drop folder' {
-            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+            "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
+            "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'Start-Job is not called' {
@@ -440,11 +434,10 @@ Describe 'when an input file is incorrect because' {
         }
         Context 'logging' {
             BeforeAll {
-                $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
-                $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+                $testLogFile = Get-ChildItem $clonedParams.LogFolder -Recurse -File
             }
             It 'the log folder is created' {            
-                $testLogFolder | Should -Exist
+                $clonedParams.LogFolder | Should -Exist
             }
             It 'two files are created in the log folder' {
                 $testLogFile.Count | Should -BeExactly 2
@@ -459,23 +452,28 @@ Describe 'when an input file is incorrect because' {
     }
     Context 'the user used a parameter that is not available in the scriptMapping table' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
-            @{  PrinterName = "MyCustomPrinter"; UnknownParameter = 'Oops' } | 
+            @{  
+                PrinterName      = "MyCustomPrinter"
+                UnknownParameter = 'Oops' 
+            } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
     
-            . $testScript @Params -EA Ignore
+            $clonedParams = $testParams.Clone()
+            $clonedParams.LogFolder = "$($testParams.LogFolder)\Test2"
+            . $testScript @clonedParams -EA Ignore
         }
         It 'it is moved to the archive folder in the drop folder' {
-            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+            "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
+            "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the incorrect parameter name' {
-            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual = Get-Content "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
             $actual.errorMessage | Should -BeLike "*parameter 'UnknownParameter' is not accepted*"
         } 
         It 'Start-Job is not called' {
@@ -491,11 +489,10 @@ Describe 'when an input file is incorrect because' {
         } 
         Context 'logging' {
             BeforeAll {
-                $testLogFolder = "$($Params.LogFolder)\Monitor\Monitor script execution folder\$($Params.ScriptName)"
-                $testLogFile = Get-ChildItem $testLogFolder -Recurse -File
+                $testLogFile = Get-ChildItem $clonedParams.LogFolder -Recurse -File
             }
             It 'the log folder is created' {            
-                $testLogFolder | Should -Exist
+                $clonedParams.LogFolder | Should -Exist
             }
             It 'two files are created in the log folder' {
                 $testLogFile.Count | Should -BeExactly 2
@@ -509,11 +506,10 @@ Describe 'when an input file is incorrect because' {
         }
     }
 }
-
 Describe 'when Start-Job fails' {
     Context 'because of a missing mandatory parameter' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
@@ -529,18 +525,18 @@ Describe 'when Start-Job fails' {
                     # parameters name is missing
                 } -ArgumentList 1
             }
-            . $testScript @Params -EA SilentlyContinue
+            . $testScript @testParams -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
-            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+            "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
+            "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual = Get-Content "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
             $actual.errorMessage | Should -BeLike "*Job status 'Blocked', have you provided all mandatory parameters?*"
         } -Tag test
         It 'an email is sent to the admin' {
@@ -554,7 +550,7 @@ Describe 'when Start-Job fails' {
     }
     Context 'because of parameter validation issues' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
@@ -568,18 +564,18 @@ Describe 'when Start-Job fails' {
                     # parameters not matching
                 } -ArgumentList 'string'
             }
-            . $testScript @Params -EA SilentlyContinue
+            . $testScript @testParams -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
-            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+            "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
+            "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual = Get-Content "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
             $actual.errorMessage | Should -BeLike "*Cannot process argument transformation on parameter 'IncorrectParameters'*"
         }
         It 'an email is sent to the admin' {
@@ -593,7 +589,7 @@ Describe 'when Start-Job fails' {
     }
     Context 'because of errors in the execution script' {
         BeforeAll {
-            $testInputFile = (Join-Path $Params.dropFolder 'inputFile.json')
+            $testInputFile = (Join-Path $testParams.dropFolder 'inputFile.json')
      
             @{  PrinterName = "MyCustomPrinter" } | 
             ConvertTo-Json | Out-File $testInputFile -Encoding utf8
@@ -604,18 +600,18 @@ Describe 'when Start-Job fails' {
                 }
             }
 
-            . $testScript @Params -EA SilentlyContinue
+            . $testScript @testParams -EA SilentlyContinue
         }
         It 'the input file is moved to the archive folder' {
-            "$($Params.DropFolder)\inputFile.json" | Should -Not -Exist
-            "$($Params.DropFolder)\Archive\inputFile.json" | Should -Exist
+            "$($testParams.DropFolder)\inputFile.json" | Should -Not -Exist
+            "$($testParams.DropFolder)\Archive\inputFile.json" | Should -Exist
         }
         It 'an error file is created in the archive folder' {
-            "$($Params.DropFolder)\Archive\inputFile - ERROR.json" | 
+            "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" | 
             Should -Exist
         }
         It 'the error file contains the error message' {
-            $actual = Get-Content "$($Params.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
+            $actual = Get-Content "$($testParams.DropFolder)\Archive\inputFile - ERROR.json" -Raw | ConvertFrom-Json
             $actual.errorMessage | Should -BeLike "*Failure in script*"
         }
         It 'an email is sent to the admin' {
@@ -627,4 +623,4 @@ Describe 'when Start-Job fails' {
             }
         } 
     } 
-} -Tag test
+}

@@ -38,13 +38,13 @@ Param (
     [String[]]$DropFolder,
     [String]$ScriptName = 'Monitor script execution folder (BNL)',
     [HashTable]$ScriptMapping = @{
-        'T:\Input\Scripts\Get AD group members'       = @{
+        'T:\Input\Scripts\Get AD group members' = @{
             script            = 'T:\Prod\AD Reports\AD Group members\AD Group members.ps1'
             defaultParameters = @{
                 ScriptName = 'AD group members (BNL)'
             }
         }
-        'T:\Input\Scripts\Get AD users all' = @{
+        'T:\Input\Scripts\Get AD users all'     = @{
             script            = 'T:\Prod\AD Reports\AD Users all\AD Users all.ps1'
             defaultParameters = @{
                 ScriptName = 'AD users all (BNL)'
@@ -52,8 +52,8 @@ Param (
         }
     },
     [Switch]$Archive,
-    [String]$LogFolder = $env:POWERSHELL_LOG_FOLDER,
-    [String]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN
+    [String]$LogFolder = "$env:POWERSHELL_LOG_FOLDER\Monitor\Monitor script execution folder\$ScriptName",
+    [String[]]$ScriptAdmin = $env:POWERSHELL_SCRIPT_ADMIN
 )
 
 Begin {
@@ -84,13 +84,18 @@ Begin {
         Write-EventLog @EventStartParams
 
         #region Logging
-        $LogParams = @{
-            LogFolder    = New-FolderHC -Path $LogFolder -ChildPath "Monitor\Monitor script execution folder\$ScriptName"
-            Name         = $ScriptName
-            Date         = 'ScriptStartTime'
-            NoFormatting = $true
+        try {
+            $logParams = @{
+                LogFolder    = New-Item -Path $LogFolder -ItemType 'Directory' -Force -ErrorAction 'Stop'
+                Name         = $ScriptName
+                Date         = 'ScriptStartTime'
+                NoFormatting = $true
+            }
+            $logFile = New-LogFileNameHC @LogParams
         }
-        $LogFile = New-LogFileNameHC @LogParams
+        Catch {
+            throw "Failed creating the log folder '$LogFolder': $_"
+        }
         #endregion
 
         $psBuildInParameters = [System.Management.Automation.PSCmdlet]::CommonParameters
