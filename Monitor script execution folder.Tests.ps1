@@ -1,13 +1,7 @@
-﻿#Requires -Module Assert, Pester
+﻿#Requires -Modules Pester
 
 BeforeAll {
     $StartJobCommand = Get-Command Start-Job
-
-    $MailAdminParams = {
-        ($To -eq $ScriptAdmin) -and 
-        ($Priority -eq 'High') -and 
-        ($Subject -eq 'FAILURE')
-    }
     
     $testScriptToExecute = (New-Item -Path "TestDrive:\scripts\scriptA.ps1" -Force -ItemType File -EA Ignore).FullName
     $testScriptFolder = (New-Item -Path "TestDrive:\input\scriptA" -ItemType Directory -Force -EA Ignore).FullName
@@ -39,7 +33,14 @@ BeforeAll {
         ScriptMapping = @{ $testScriptFolder = $testScriptSettings }
         Archive       = $true
         LogFolder     = "TestDrive:\Log"
+        ScriptAdmin   = 'admin@contoso.com'
     }    
+
+    $MailAdminParams = {
+        ($To -eq $ScriptAdmin) -and 
+        ($Priority -eq 'High') -and 
+        ($Subject -eq 'FAILURE')
+    }
 
     Mock Send-MailHC
     Mock Start-Job -MockWith {
