@@ -5,7 +5,7 @@
     .DESCRIPTION
         This script is designed to be triggered by a scheduled task. It will
         execute the correct script based on the folder where the user stores
-        the the input file.
+        the input file.
 
     .PARAMETER ScriptMapping
         Defines the link between the script to execute and the folder where
