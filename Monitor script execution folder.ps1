@@ -17,8 +17,8 @@
             script = 'the ps1 file to execute when files are in the drop folder'
             defaultParameters = 'default values for the script'
                 - scriptName = 'is a mandatory parameter to generate unique 
-                                script names for echt script when multiple input 
-                                files were found for the same script'
+                                script names for each script when multiple 
+                                input files were found for the same script'
         }
 
     .PARAMETER DropFolder
