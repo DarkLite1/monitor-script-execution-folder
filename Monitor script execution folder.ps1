@@ -329,7 +329,7 @@ Process {
                     "`n- ArgumentList:`t" + $startJobArgumentList)
                 $StartJobParams = @{
                     Name                 = $defaultParameters['ScriptName']
-                    InitializationScript = $LoadModules
+                    # InitializationScript = $LoadModules
                     LiteralPath          = $scriptSettings.script
                     ArgumentList         = $startJobArgumentList
                 }
