@@ -1,3 +1,6 @@
+#Requires -Version 5.1
+#Requires -Modules Toolbox.HTML, Toolbox.EventLog, Toolbox.General
+
 <#
     .SYNOPSIS
         Allow end users to execute scripts by placing input files in a folder
@@ -231,9 +234,7 @@ Process {
                 if ($Archive) {
                     Write-Verbose 'Move to archive folder'
                     $job.archiveDir = Join-Path $folder 'Archive'
-                    if (-not (Test-Path -Path $job.archiveDir -PathType 'Container')) {
-                        $null = New-Item -Path $job.archiveDir -ItemType Directory
-                    }
+                    $null = New-Item -Path $job.archiveDir -ItemType Directory -EA Ignore
                     $inputFile | Move-Item -Destination $job.archiveDir -Force -EA Stop
                 }
 
