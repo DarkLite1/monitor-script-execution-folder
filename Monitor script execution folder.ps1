@@ -230,7 +230,10 @@ Process {
 
                 if ($Archive) {
                     Write-Verbose 'Move to archive folder'
-                    $job.archiveDir = New-FolderHC -Path $folder -ChildPath Archive
+                    $job.archiveDir = Join-Path $folder 'Archive'
+                    if (-not (Test-Path -Path $job.archiveDir -PathType 'Container')) {
+                        $null = New-Item -Path $job.archiveDir -ItemType Directory
+                    }
                     $inputFile | Move-Item -Destination $job.archiveDir -Force -EA Stop
                 }
 
@@ -279,7 +282,7 @@ Process {
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
-                        $errorFile = "$($job.archiveDir.FullName)\$($inputFile.BaseName) - ERROR.json"
+                        $errorFile = "$($job.archiveDir)\$($inputFile.BaseName) - ERROR.json"
                         $errorFileMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
 
@@ -328,10 +331,10 @@ Process {
                     "`n- Script:`t`t" + $scriptSettings.script + 
                     "`n- ArgumentList:`t" + $startJobArgumentList)
                 $StartJobParams = @{
-                    Name                 = $defaultParameters['ScriptName']
+                    Name         = $defaultParameters['ScriptName']
                     # InitializationScript = $LoadModules
-                    LiteralPath          = $scriptSettings.script
-                    ArgumentList         = $startJobArgumentList
+                    LiteralPath  = $scriptSettings.script
+                    ArgumentList = $startJobArgumentList
                 }
                 $job.job = Start-Job @StartJobParams
                 #endregion
@@ -410,7 +413,7 @@ Process {
 
                     if ($Archive) {
                         Write-Verbose 'Create error file in archive folder'
-                        $errorFile = "$($j.archiveDir.FullName)\$($j.inputFile.BaseName) - ERROR.json"
+                        $errorFile = "$($j.archiveDir)\$($j.inputFile.BaseName) - ERROR.json"
                         $errorFileMessage | Out-File $errorFile -Encoding utf8 -Force
                     }
 
